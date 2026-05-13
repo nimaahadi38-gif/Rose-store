@@ -1,0 +1,105 @@
+<?php
+class Router {
+    private Telegram $telegram;
+    private PDO $pdo;
+    private array $config;
+    private array $settings;
+    private CallbackHandler $callbackHandler;
+    private AdminHandler $adminHandler;
+    private UserHandler $userHandler;
+
+    public function __construct(
+        Telegram $telegram,
+        PDO $pdo,
+        array $config,
+        array $settings,
+        ServerManager $serverManager
+    ) {
+        $this->telegram = $telegram;
+        $this->pdo      = $pdo;
+        $this->config   = $config;
+        $this->settings = $settings;
+
+        $payment = new PaymentHandler($pdo, $telegram, $settings, $config, $serverManager);
+
+        $this->callbackHandler = new CallbackHandler($pdo, $telegram, $settings, $config, $payment);
+        $this->adminHandler    = new AdminHandler($pdo, $telegram, $settings, $config, $serverManager);
+        $this->userHandler     = new UserHandler($pdo, $telegram, $settings, $config, $payment);
+    }
+
+    public function dispatch(array $update): void {
+        $user_id = (int)($update['message']['from']['id'] ?? ($update['callback_query']['from']['id'] ?? 0));
+        $chat_id = (int)($update['message']['chat']['id'] ?? ($update['callback_query']['message']['chat']['id'] ?? 0));
+
+        if (!$user_id) return;
+
+        $stmt = $this->pdo->prepare("SELECT 1 FROM admins WHERE chat_id = ?");
+        $stmt->execute([$user_id]);
+        $is_admin = (bool)$stmt->fetchColumn() || $user_id === (int)$this->config['admin_id'];
+
+        // Callback query
+        if (isset($update['callback_query'])) {
+            $this->callbackHandler->handle($update, $user_id, $is_admin);
+            return;
+        }
+
+        // پیام متنی
+        if (!isset($update['message'])) return;
+
+        $text     = $update['message']['text'] ?? '';
+        $stmt2    = $this->pdo->prepare("SELECT * FROM users WHERE chat_id = ?");
+        $stmt2->execute([$user_id]);
+        $user = $stmt2->fetch(PDO::FETCH_ASSOC);
+
+        if (!$user) {
+            $this->pdo->prepare("INSERT INTO users (chat_id, last_msg_time) VALUES (?, ?)")->execute([$user_id, time()]);
+            $user = ['step' => null, 'wallet' => 0, 'is_reseller' => 0, 'trial_used' => 0, 'join_date' => date('Y-m-d H:i:s')];
+        } else {
+            $this->pdo->prepare("UPDATE users SET last_msg_time = ? WHERE chat_id = ?")->execute([time(), $user_id]);
+        }
+
+        $step = $user['step'];
+
+        // ربات خاموش
+        if ($this->settings['bot_status'] == '0' && !$is_admin) {
+            $this->telegram->sendMessage($chat_id, '🛠 ربات موقتاً در حال بروزرسانی است. لطفاً بعداً مراجعه کنید...');
+            return;
+        }
+
+        // لغو / بازگشت
+        $cancel_triggers = ['/cancel', '🔙 انصراف', '🔙 انصراف از خرید', '🔙 بازگشت به داشبورد',
+                            '🔙 بازگشت به ربات', '🔙 بازگشت به پنل اصلی', '🔙 تنظیمات ربات',
+                            '🔙 مدیریت فروشگاه', '🔙 مالی و کیف‌پول'];
+        if (in_array($text, $cancel_triggers)) {
+            setStep($this->pdo, $user_id, null);
+            if ($is_admin && strpos($text, 'بازگشت') !== false && $text !== '🔙 بازگشت به ربات') {
+                $this->telegram->request('sendMessage', ['chat_id' => $chat_id, 'text' => '👨‍💻 داشبورد مدیریت:', 'reply_markup' => getAdminMainKeyboard()]);
+            } else {
+                $this->telegram->request('sendMessage', ['chat_id' => $chat_id, 'text' => 'عملیات لغو شد.', 'reply_markup' => getUserKeyboard($this->settings)]);
+            }
+            return;
+        }
+
+        // ریست step برای دکمه‌های منوی اصلی
+        $main_menu_items = [
+            $this->settings['buy_text'], $this->settings['services_text'], $this->settings['account_text'],
+            $this->settings['trial_text'], $this->settings['referral_text'], $this->settings['support_text'],
+            $this->settings['guide_text'], '💰 شارژ کیف پول', '🤝 درخواست نمایندگی', '/start',
+        ];
+        if (in_array($text, $main_menu_items)) {
+            $step = null;
+            setStep($this->pdo, $user_id, null);
+        }
+
+        // ادمین
+        if ($is_admin) {
+            $user['step'] = $step;
+            $handled = $this->adminHandler->handle($update, $user_id, $chat_id, $text, $step);
+            if ($handled) return;
+        }
+
+        // کاربر
+        $user['step'] = $step;
+        $this->userHandler->handle($update, $user_id, $chat_id, $text, $step, $user);
+    }
+}
