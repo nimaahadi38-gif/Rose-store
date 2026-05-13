@@ -1,0 +1,6 @@
+# فایل‌های کوکی و state ربات — حاوی اطلاعات حساس
+cookie*.txt
+bot.lock
+offset.txt
+spam/
+states/
