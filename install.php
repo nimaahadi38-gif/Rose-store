@@ -87,12 +87,24 @@ $pdo->exec("CREATE TABLE IF NOT EXISTS `transactions` (
 // ادمین اصلی
 $pdo->prepare("INSERT IGNORE INTO admins (chat_id) VALUES (?)")->execute([$config['admin_id']]);
 
+// جدول broadcasts (پیام همگانی صف‌محور)
+$pdo->exec("CREATE TABLE IF NOT EXISTS `broadcasts` (
+    `id`           INT(11)      NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    `message_json` TEXT         NOT NULL,
+    `status`       ENUM('pending','done') DEFAULT 'pending',
+    `sent`         INT          DEFAULT 0,
+    `total`        INT          DEFAULT 0,
+    `created_at`   TIMESTAMP    DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
 // افزودن ستون‌های جدید به جداول قدیمی (برای ارتقاء از نسخه قبلی)
 $alter_queries = [
     "ALTER TABLE orders ADD COLUMN server_id INT NULL DEFAULT NULL",
     "ALTER TABLE orders ADD COLUMN last_notified TIMESTAMP NULL DEFAULT NULL",
+    "ALTER TABLE orders ADD COLUMN volume_warned TINYINT(1) DEFAULT 0",
     "ALTER TABLE transactions ADD COLUMN receipt_file_hash VARCHAR(64) NULL DEFAULT NULL",
     "ALTER TABLE transactions ADD COLUMN receipt_submitted_at TIMESTAMP NULL DEFAULT NULL",
+    "ALTER TABLE transactions ADD COLUMN status VARCHAR(30) DEFAULT 'pending'",
 ];
 foreach ($alter_queries as $q) {
     try { $pdo->exec($q); } catch (PDOException $e) { /* ستون قبلاً وجود دارد */ }
@@ -124,6 +136,20 @@ $defaults = [
     'text_start' => '👋 سلام! به فروشگاه ما خوش آمدید.',
     'channel_btn_text' => '🛒 خرید سرویس اختصاصی',
     'channel_btn_link' => 'https://t.me/',
+    // کمپین تخفیف سراسری
+    'campaign_status' => '0',
+    'campaign_pct'    => '0',
+    'campaign_label'  => '',
+    // پاکسازی خودکار سرویس منقضی
+    'cleanup_status' => '1',
+    'cleanup_days'   => '7',
+    // تایید خودکار رسید کارت
+    'auto_confirm_hours' => '0',
+    // دکمه‌های منوی جدید (برای backward compat با نام‌های قبلی)
+    'account_text'  => '👤 حساب من',
+    'buy_text'      => '🛒 خرید سرویس',
+    'services_text' => '📦 سرویس‌های من',
+    'support_text'  => '💬 پشتیبانی',
 ];
 foreach ($defaults as $k => $v) {
     $pdo->prepare("INSERT IGNORE INTO settings (setting_key, setting_value) VALUES (?, ?)")->execute([$k, $v]);

@@ -46,8 +46,29 @@ class Router {
         // پیام متنی
         if (!isset($update['message'])) return;
 
-        $text     = $update['message']['text'] ?? '';
-        $stmt2    = $this->pdo->prepare("SELECT * FROM users WHERE chat_id = ?");
+        $text = $update['message']['text'] ?? '';
+
+        // Rate limiting: حداکثر ۳۰ پیام در ۶۰ ثانیه برای غیر ادمین
+        if (!$is_admin && !empty($text)) {
+            $stmt_rl = $this->pdo->prepare("SELECT last_msg_time FROM users WHERE chat_id = ?");
+            $stmt_rl->execute([$user_id]);
+            $rl_row = $stmt_rl->fetch(PDO::FETCH_ASSOC);
+            if ($rl_row) {
+                $stmt_cnt = $this->pdo->prepare(
+                    "SELECT COUNT(*) FROM users WHERE chat_id = ? AND last_msg_time > ?"
+                );
+                // ساده‌ترین روش: یک فیلد rate_count + rate_window در users
+                // فعلاً بررسی می‌کنیم آیا کاربر در ۱ ثانیه اخیر پیام فرستاده
+                // برای rate limiting کامل نیاز به ستون اضافه است
+                // این پیاده‌سازی ابتدایی: بلاک در صورت last_msg_time < 1 ثانیه قبل
+                if (time() - (int)($rl_row['last_msg_time'] ?? 0) < 1) {
+                    // صبر کوتاه — بدون پاسخ برای جلوگیری از flood
+                    return;
+                }
+            }
+        }
+
+        $stmt2 = $this->pdo->prepare("SELECT * FROM users WHERE chat_id = ?");
         $stmt2->execute([$user_id]);
         $user = $stmt2->fetch(PDO::FETCH_ASSOC);
 
@@ -66,25 +87,27 @@ class Router {
             return;
         }
 
-        // لغو / بازگشت
+        // لغو / بازگشت — شامل دکمه‌های جدید و قدیمی
         $cancel_triggers = ['/cancel', '🔙 انصراف', '🔙 انصراف از خرید', '🔙 بازگشت به داشبورد',
                             '🔙 بازگشت به ربات', '🔙 بازگشت به پنل اصلی', '🔙 تنظیمات ربات',
-                            '🔙 مدیریت فروشگاه', '🔙 مالی و کیف‌پول'];
+                            '🔙 مدیریت فروشگاه', '🔙 مالی و کیف‌پول', '🔙 بازگشت'];
         if (in_array($text, $cancel_triggers)) {
             setStep($this->pdo, $user_id, null);
             if ($is_admin && strpos($text, 'بازگشت') !== false && $text !== '🔙 بازگشت به ربات') {
-                $this->telegram->request('sendMessage', ['chat_id' => $chat_id, 'text' => '👨‍💻 داشبورد مدیریت:', 'reply_markup' => getAdminMainKeyboard()]);
+                $this->telegram->request('sendMessage', ['chat_id' => $chat_id, 'text' => '👨‍💻 داشبورد مدیریت:', 'reply_markup' => getAdminMainKeyboard($this->settings)]);
             } else {
                 $this->telegram->request('sendMessage', ['chat_id' => $chat_id, 'text' => 'عملیات لغو شد.', 'reply_markup' => getUserKeyboard($this->settings)]);
             }
             return;
         }
 
-        // ریست step برای دکمه‌های منوی اصلی
+        // ریست step برای دکمه‌های منوی اصلی (جدید + قدیمی)
         $main_menu_items = [
             $this->settings['buy_text'], $this->settings['services_text'], $this->settings['account_text'],
-            $this->settings['trial_text'], $this->settings['referral_text'], $this->settings['support_text'],
-            $this->settings['guide_text'], '💰 شارژ کیف پول', '🤝 درخواست نمایندگی', '/start',
+            $this->settings['support_text'], '📖 راهنما و تست', '/start',
+            // سازگاری با قدیمی
+            $this->settings['trial_text'], $this->settings['referral_text'], $this->settings['guide_text'],
+            '💰 شارژ کیف پول', '🤝 درخواست نمایندگی',
         ];
         if (in_array($text, $main_menu_items)) {
             $step = null;

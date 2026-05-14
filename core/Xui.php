@@ -227,4 +227,20 @@ class Xui {
         $res = $this->login();
         return $res['status'];
     }
+
+    public function deleteClient(int $inbound_id, string $uuid): bool {
+        $login = $this->login();
+        if (!$login['status']) return false;
+
+        $res = $this->curlRequest("/panel/api/inbounds/{$inbound_id}/delClient/{$uuid}", [], true);
+        return $res && isset($res['success']) && $res['success'];
+    }
+
+    public function resetClientTraffic(int $inbound_id, string $email): bool {
+        $login = $this->login();
+        if (!$login['status']) return false;
+
+        $res = $this->curlRequest("/panel/api/inbounds/{$inbound_id}/resetClientTraffic/{$email}", [], true);
+        return $res && isset($res['success']) && $res['success'];
+    }
 }

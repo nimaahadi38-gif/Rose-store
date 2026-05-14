@@ -28,6 +28,7 @@ require_once __DIR__ . '/core/DB.php';
 require_once __DIR__ . '/core/Telegram.php';
 require_once __DIR__ . '/core/Utils.php';
 require_once __DIR__ . '/core/Xui.php';
+require_once __DIR__ . '/core/Jalali.php';
 require_once __DIR__ . '/core/ServerManager.php';
 require_once __DIR__ . '/core/Router.php';
 require_once __DIR__ . '/handlers/PaymentHandler.php';

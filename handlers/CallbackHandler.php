@@ -139,6 +139,132 @@ class CallbackHandler {
             return;
         }
 
+        // ادمین: مدیریت کمپین تخفیف
+        if ($data === 'campaign_activate' && $is_admin) {
+            setStep($this->pdo, $user_id, 'set_campaign_pct');
+            $this->telegram->request('sendMessage', ['chat_id' => $chat_id, 'parse_mode' => 'HTML',
+                'text' => "🔥 <b>فعال‌سازی کمپین تخفیف</b>\n\nدرصد تخفیف را وارد کنید:\n<i>(عدد بین ۱ تا ۹۹)</i>",
+                'reply_markup' => getCancelKeyboard()]);
+            $this->telegram->answerCallback($call_id);
+            return;
+        }
+
+        if ($data === 'campaign_deactivate' && $is_admin) {
+            $this->pdo->prepare("UPDATE settings SET setting_value = '0' WHERE setting_key = 'campaign_status'")->execute();
+            setStep($this->pdo, $user_id, null);
+            $this->telegram->answerCallback($call_id, '✅ کمپین غیرفعال شد.', true);
+            $this->telegram->request('sendMessage', ['chat_id' => $chat_id,
+                'text' => '💳 مالی و کیف‌پول:', 'reply_markup' => getFinanceKeyboard($this->settings)]);
+            return;
+        }
+
+        if ($data === 'campaign_skip_label' && $is_admin) {
+            $this->pdo->prepare("UPDATE settings SET setting_value = '1' WHERE setting_key = 'campaign_status'")->execute();
+            $this->pdo->prepare("UPDATE settings SET setting_value = '' WHERE setting_key = 'campaign_label'")->execute();
+            setStep($this->pdo, $user_id, null);
+            $this->telegram->answerCallback($call_id, '✅ کمپین بدون برچسب فعال شد!', true);
+            $this->telegram->request('sendMessage', ['chat_id' => $chat_id,
+                'text' => '💳 مالی و کیف‌پول:', 'reply_markup' => getFinanceKeyboard($this->settings)]);
+            return;
+        }
+
+        // کاربر: بخش حساب
+        if ($data === 'account_charge') {
+            setStep($this->pdo, $user_id, 'ask_charge_amount');
+            $this->telegram->request('sendMessage', ['chat_id' => $chat_id, 'parse_mode' => 'HTML',
+                'text' => "💰 <b>شارژ کیف پول</b>\n\nمبلغ مورد نظر برای شارژ را به <b>تومان</b> وارد کنید:",
+                'reply_markup' => getCancelKeyboard()]);
+            $this->telegram->answerCallback($call_id);
+            return;
+        }
+
+        if ($data === 'account_referral') {
+            $stmt = $this->pdo->prepare("SELECT COUNT(*) FROM users WHERE invited_by = ?");
+            $stmt->execute([$user_id]);
+            $count        = (int)$stmt->fetchColumn();
+            $reward       = (int)($this->settings['referral_reward'] ?? 0);
+            $bot_username = $this->config['bot_username'] ?? '';
+            $link         = $bot_username ? "https://t.me/{$bot_username}?start=ref_{$user_id}" : "ref_{$user_id}";
+            $rows         = ["🔗 لینک دعوت:", "<code>{$link}</code>", "👥 دعوت‌شدگان: {$count} نفر"];
+            if ($reward > 0) {
+                $rows[] = "🎁 پاداش هر دعوت: " . number_format($reward) . " تومان";
+            }
+            $this->telegram->request('sendMessage', ['chat_id' => $chat_id, 'parse_mode' => 'HTML',
+                'text' => formatCard('زیرمجموعه‌گیری', $rows), 'disable_web_page_preview' => true]);
+            $this->telegram->answerCallback($call_id);
+            return;
+        }
+
+        if ($data === 'account_reseller') {
+            $stmt = $this->pdo->prepare("SELECT is_reseller, wallet FROM users WHERE chat_id = ?");
+            $stmt->execute([$user_id]);
+            $row = $stmt->fetch(PDO::FETCH_ASSOC);
+            if ($row && $row['is_reseller']) {
+                $this->telegram->answerCallback($call_id, '✅ شما قبلاً نماینده هستید!', true);
+                return;
+            }
+            $fee      = (int)$this->settings['reseller_fee'];
+            $discount = (int)$this->settings['reseller_discount'];
+            $wallet   = (int)($row['wallet'] ?? 0);
+            $rows     = ["💎 سطح: نمایندگی ویژه", "🎯 تخفیف دائم: {$discount}٪ روی همه پلن‌ها",
+                         "💵 هزینه: " . number_format($fee) . " تومان", "♾️ مدت: دائمی"];
+            $keys = [];
+            if ($wallet >= $fee) {
+                $keys[] = [['text' => '💰 پرداخت از کیف پول', 'callback_data' => 'reseller_pay_wallet']];
+            }
+            if ($this->settings['tetra_status'] == '1') {
+                $keys[] = [['text' => '🌐 پرداخت آنلاین', 'callback_data' => 'reseller_pay_tetra']];
+            }
+            if ($this->settings['card_status'] == '1') {
+                $keys[] = [['text' => '💳 کارت به کارت', 'callback_data' => 'reseller_pay_card']];
+            }
+            if ($this->settings['crypto_status'] == '1') {
+                $keys[] = [['text' => '💲 پرداخت ارزی', 'callback_data' => 'reseller_pay_crypto']];
+            }
+            $this->telegram->request('sendMessage', ['chat_id' => $chat_id, 'parse_mode' => 'HTML',
+                'text' => formatCard('درخواست نمایندگی', $rows),
+                'reply_markup' => json_encode(['inline_keyboard' => $keys])]);
+            $this->telegram->answerCallback($call_id);
+            return;
+        }
+
+        // کاربر: تست رایگان
+        if ($data === 'get_trial') {
+            $stmt = $this->pdo->prepare("SELECT trial_used FROM users WHERE chat_id = ?");
+            $stmt->execute([$user_id]);
+            $trial_used = (bool)$stmt->fetchColumn();
+            if ($trial_used) {
+                $this->telegram->answerCallback($call_id, '❌ قبلاً از تست رایگان استفاده کرده‌اید!', true);
+                return;
+            }
+            if ($this->settings['trial_status'] != '1') {
+                $this->telegram->answerCallback($call_id, '❌ تست رایگان در حال حاضر غیرفعال است.', true);
+                return;
+            }
+            $this->telegram->answerCallback($call_id, '⏳ در حال ساخت تست رایگان...');
+            $trial_mb   = (int)($this->settings['trial_mb'] ?? 500);
+            $trial_mins = (int)($this->settings['trial_mins'] ?? 60);
+            $uuid       = sprintf('%04x%04x-%04x-%04x-%04x-%04x%04x%04x',
+                mt_rand(0, 0xffff), mt_rand(0, 0xffff), mt_rand(0, 0xffff),
+                mt_rand(0, 0x0fff) | 0x4000, mt_rand(0, 0x3fff) | 0x8000,
+                mt_rand(0, 0xffff), mt_rand(0, 0xffff), mt_rand(0, 0xffff));
+            $email     = 'trial_' . $user_id . '_' . time();
+            $bytes     = $trial_mb * 1024 * 1024;
+            $expiry_ms = (time() + ($trial_mins * 60)) * 1000;
+            $xui       = new Xui($this->settings['panel_url'], $this->settings['panel_user'], $this->settings['panel_pass']);
+            $result    = $xui->addClient((int)($this->settings['inbound_id'] ?? 1), $email, $uuid, $bytes,
+                                         $expiry_ms, 1, $this->settings['sub_domain'] ?? '');
+            if (!$result['status']) {
+                $this->telegram->sendMessage($chat_id, '❌ خطا در ساخت تست رایگان. لطفاً با پشتیبانی تماس بگیرید.');
+                return;
+            }
+            $this->pdo->prepare("UPDATE users SET trial_used = 1 WHERE chat_id = ?")->execute([$user_id]);
+            $this->telegram->sendMessage($chat_id,
+                "🎁 <b>تست رایگان آماده شد!</b>\n\n📊 حجم: <b>{$trial_mb} MB</b> | ⏱ مدت: <b>{$trial_mins} دقیقه</b>\n\n"
+                . $result['link'], 'HTML');
+            return;
+        }
+
         $this->telegram->answerCallback($call_id);
     }
 
@@ -257,6 +383,28 @@ class CallbackHandler {
             $this->telegram->request('sendPhoto', ['chat_id' => $chat_id, 'photo' => $qr_url,
                 'caption' => "📱 <b>QR Code سرویس شما</b>", 'parse_mode' => 'HTML']);
             $this->telegram->answerCallback($call_id);
+        } elseif ($sub_action === 'renew') {
+            $stmt_plans = $this->pdo->query("SELECT id, name, gb, days, price FROM plans ORDER BY price ASC");
+            $plans      = $stmt_plans->fetchAll(PDO::FETCH_ASSOC);
+            if (empty($plans)) {
+                $this->telegram->answerCallback($call_id, '❌ پلن فعالی وجود ندارد.', true);
+                return;
+            }
+            $keys = [];
+            foreach ($plans as $p) {
+                $price = $p['price'];
+                if (!empty($this->settings['campaign_status']) && $this->settings['campaign_status'] == '1') {
+                    $pct = max(0, min(99, (int)($this->settings['campaign_pct'] ?? 0)));
+                    if ($pct > 0) $price = (int)round($price * (100 - $pct) / 100);
+                }
+                $keys[] = [['text' => "🛒 {$p['name']} | " . number_format($price) . " تومان",
+                             'callback_data' => "pay|{$p['id']}|none|name"]];
+            }
+            $this->telegram->request('editMessageText', ['chat_id' => $chat_id, 'message_id' => $msg_id,
+                'parse_mode' => 'HTML',
+                'text' => "🔄 <b>تمدید / خرید سرویس جدید</b>\n\nپلن مورد نظر را انتخاب کنید:",
+                'reply_markup' => json_encode(['inline_keyboard' => $keys])]);
+            $this->telegram->answerCallback($call_id);
         } else {
             $this->telegram->sendMessage($chat_id, "☎️ جهت این عملیات با ارسال شناسه <code>{$order['email']}</code> به پشتیبانی پیام دهید.", 'HTML');
             $this->telegram->answerCallback($call_id);
@@ -266,7 +414,6 @@ class CallbackHandler {
     private function showServiceInfo(array $order, int $user_id, int $chat_id, int $msg_id, string $call_id): void {
         $this->telegram->answerCallback($call_id, '⏳ در حال دریافت آمار زنده...');
 
-        // اتصال به سرور مناسب (سرور مشخص شده یا پیش‌فرض از تنظیمات)
         if (!empty($order['server_url'])) {
             $xui = new Xui($order['server_url'], $order['server_user'], $order['server_pass']);
         } else {
@@ -274,25 +421,36 @@ class CallbackHandler {
         }
 
         $stats = $xui->getClientStats($order['email']);
-        $msg   = "📦 <b>اطلاعات زنده سرویس:</b>\n\n🔹 پلن: <b>{$order['plan_name']}</b>\n📧 شناسه: <code>{$order['email']}</code>\n";
+        $oid   = (int)$order['id'];
 
         if ($stats) {
-            $total   = (int)$stats['total'];
-            $used    = (int)$stats['up'] + (int)$stats['down'];
-            $rem     = $total - $used;
-            $expiry  = $stats['expiryTime'] == 0 ? 'نامحدود' : date('Y-m-d H:i', (int)$stats['expiryTime'] / 1000);
-            $status  = $stats['enable'] ? '🟢 فعال' : '🔴 غیرفعال';
-            $msg .= "〰️〰️〰️〰️〰️\n"
-                  . "📊 وضعیت: $status\n"
-                  . "📥 مصرفی: <code>" . formatBytes($used) . "</code>\n"
-                  . "🔋 باقیمانده: <code>" . ($total == 0 ? 'نامحدود' : formatBytes(max(0, $rem))) . "</code>"
-                  . ($total > 0 ? " (از " . formatBytes($total) . ")" : '') . "\n"
-                  . "⏳ انقضا: <code>$expiry</code>\n";
+            $total      = (int)$stats['total'];
+            $used       = (int)$stats['up'] + (int)$stats['down'];
+            $rem        = $total - $used;
+            $expiry_ms  = (int)$stats['expiryTime'];
+            $expiry_str = $expiry_ms == 0 ? 'نامحدود' : Jalali::toJalali((int)($expiry_ms / 1000));
+            $days_left  = $expiry_ms == 0 ? 'نامحدود' : Jalali::daysUntil((int)($expiry_ms / 1000));
+            $status_icon = $stats['enable'] ? '🟢' : '🔴';
+
+            $rows = [
+                "📦 پلن: <b>{$order['plan_name']}</b>",
+                "🔑 شناسه: <code>{$order['email']}</code>",
+                "{$status_icon} وضعیت: " . ($stats['enable'] ? 'فعال' : 'غیرفعال'),
+                "📊 مصرف: <code>" . formatBytes($used) . "</code>" . ($total > 0 ? " از " . formatBytes($total) : ''),
+                "⚡ باقیمانده: <code>" . ($total == 0 ? 'نامحدود' : formatBytes(max(0, $rem))) . "</code>",
+                "⏳ انقضا: {$expiry_str}",
+                "📅 باقیمانده: {$days_left}",
+            ];
+            $msg = formatCard('سرویس فعال', $rows);
         } else {
-            $msg .= "\n⚠️ <i>امکان دریافت آمار از سرور وجود ندارد.</i>";
+            $rows = [
+                "📦 پلن: <b>{$order['plan_name']}</b>",
+                "🔑 شناسه: <code>{$order['email']}</code>",
+                "⚠️ امکان دریافت آمار از سرور وجود ندارد",
+            ];
+            $msg = formatCard('اطلاعات سرویس', $rows);
         }
 
-        $oid  = (int)$order['id'];
         $keys = [[['text' => '🔗 کپی لینک', 'callback_data' => "myserv_link_{$oid}"],
                   ['text' => '📱 بارکد (QR)', 'callback_data' => "myserv_qr_{$oid}"]]];
         $row2 = [];

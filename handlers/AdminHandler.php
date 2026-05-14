@@ -58,28 +58,42 @@ class AdminHandler {
 
     private function handleMainMenus(string $text, int $user_id, int $chat_id): bool {
         $map = [
-            '/admin'                  => ['step' => 'admin_main',     'kb' => 'getAdminMainKeyboard',     'msg' => "👨‍💻 <b>داشبورد مدیریت:</b>"],
-            '🛍 مدیریت فروشگاه'        => ['step' => 'admin_store',    'kb' => 'getStoreKeyboard',          'msg' => "📦 <b>فروشگاه و پلن‌ها:</b>"],
-            '👥 کاربران و آمار'         => ['step' => 'admin_users',    'kb' => 'getUsersSettingsKeyboard',  'msg' => "👥 <b>آمار و کاربران:</b>"],
-            '💳 مالی و کیف‌پول'         => ['step' => 'admin_finance',  'kb' => 'getFinanceKeyboard',        'msg' => "💳 <b>مالی و درگاه‌ها:</b>"],
-            '⚙️ تنظیمات ربات'          => ['step' => 'admin_settings', 'kb' => 'getBotSettingsKeyboard',    'msg' => "⚙️ <b>تنظیمات کلی:</b>"],
-            '🔌 اتصال سرور (سنایی)'    => ['step' => 'admin_panel',    'kb' => 'getPanelSettingsKeyboard', 'msg' => "🔌 <b>پنل سنایی:</b>"],
-            '🖥 مدیریت سرورها'          => ['step' => 'admin_servers',  'kb' => 'getServersKeyboard',        'msg' => "🖥 <b>مدیریت سرورهای XUI:</b>"],
+            // منوهای جدید
+            '/admin'             => ['step' => 'admin_main',     'kb' => fn() => getAdminMainKeyboard($this->settings), 'msg' => "👨‍💻 <b>داشبورد مدیریت:</b>"],
+            '🛍 فروشگاه'          => ['step' => 'admin_store',    'kb' => 'getStoreKeyboard',         'msg' => "📦 <b>فروشگاه و پلن‌ها:</b>"],
+            '👥 کاربران'          => ['step' => 'admin_users',    'kb' => 'getUsersSettingsKeyboard', 'msg' => "👥 <b>آمار و کاربران:</b>"],
+            '💳 مالی'             => ['step' => 'admin_finance',  'kb' => 'getFinanceKeyboard',       'msg' => "💳 <b>مالی و درگاه‌ها:</b>"],
+            '⚙️ تنظیمات'         => ['step' => 'admin_settings', 'kb' => 'getBotSettingsKeyboard',   'msg' => "⚙️ <b>تنظیمات:</b>"],
+            // زیرمنوهای تنظیمات — داخل getBotSettingsKeyboard
+            '🔌 پنل اصلی (XUI)'  => ['step' => 'admin_panel',    'kb' => 'getPanelSettingsKeyboard', 'msg' => "🔌 <b>پنل XUI:</b>"],
+            '🖥 سرورها'           => ['step' => 'admin_servers',  'kb' => 'getServersKeyboard',       'msg' => "🖥 <b>مدیریت سرورها:</b>"],
+            // سازگاری با کلیدهای قدیمی
+            '🛍 مدیریت فروشگاه'   => ['step' => 'admin_store',    'kb' => 'getStoreKeyboard',         'msg' => "📦 <b>فروشگاه و پلن‌ها:</b>"],
+            '👥 کاربران و آمار'    => ['step' => 'admin_users',    'kb' => 'getUsersSettingsKeyboard', 'msg' => "👥 <b>آمار و کاربران:</b>"],
+            '💳 مالی و کیف‌پول'    => ['step' => 'admin_finance',  'kb' => 'getFinanceKeyboard',       'msg' => "💳 <b>مالی و درگاه‌ها:</b>"],
+            '⚙️ تنظیمات ربات'     => ['step' => 'admin_settings', 'kb' => 'getBotSettingsKeyboard',   'msg' => "⚙️ <b>تنظیمات کلی:</b>"],
+            '🔌 اتصال سرور (سنایی)' => ['step' => 'admin_panel',  'kb' => 'getPanelSettingsKeyboard', 'msg' => "🔌 <b>پنل سنایی:</b>"],
+            '🖥 مدیریت سرورها'    => ['step' => 'admin_servers',  'kb' => 'getServersKeyboard',       'msg' => "🖥 <b>مدیریت سرورهای XUI:</b>"],
         ];
 
         if (isset($map[$text])) {
             $item = $map[$text];
             setStep($this->pdo, $user_id, $item['step']);
+            $kb = is_callable($item['kb']) ? ($item['kb'])() : ($item['kb'])();
             $this->telegram->request('sendMessage', ['chat_id' => $chat_id, 'parse_mode' => 'HTML',
-                'text' => $item['msg'], 'reply_markup' => $item['kb']()]);
+                'text' => $item['msg'], 'reply_markup' => $kb]);
             return true;
         }
 
-        if ($text === '🔴 وضعیت ربات 🟢') {
+        // وضعیت ربات — هر دو فرمت قدیمی و جدید
+        if ($text === '🔴 وضعیت ربات 🟢'
+            || strpos($text, '⬤ ربات:') === 0) {
             $new = $this->settings['bot_status'] == '1' ? '0' : '1';
             updateSetting($this->pdo, 'bot_status', $new);
+            $this->settings['bot_status'] = $new;
             $msg = $new === '1' ? '🟢 <b>ربات روشن شد.</b>' : '🔴 <b>ربات موقتاً خاموش شد.</b>';
-            $this->telegram->request('sendMessage', ['chat_id' => $chat_id, 'text' => $msg, 'parse_mode' => 'HTML']);
+            $this->telegram->request('sendMessage', ['chat_id' => $chat_id, 'text' => $msg,
+                'parse_mode' => 'HTML', 'reply_markup' => getAdminMainKeyboard($this->settings)]);
             return true;
         }
 
@@ -203,7 +217,8 @@ class AdminHandler {
     // ========================
 
     private function handleUserManagement(int $user_id, int $chat_id, string $text, ?string $step): bool {
-        if ($text === '📊 آمار پیشرفته ربات') {
+        // دکمه‌های جدید + سازگاری با قدیمی
+        if ($text === '📊 آمار' || $text === '📊 آمار پیشرفته ربات') {
             $this->sendAdvancedStats($chat_id);
             return true;
         }
@@ -217,7 +232,7 @@ class AdminHandler {
             $this->broadcastMessage($update_msg_id = 0, $chat_id, $user_id);
             return true;
         }
-        if ($text === '🔍 مدیریت کاربر') {
+        if ($text === '🔍 جستجوی کاربر' || $text === '🔍 مدیریت کاربر') {
             setStep($this->pdo, $user_id, 'admin_search_user');
             $this->telegram->sendMessage($chat_id, "آیدی عددی کاربر را وارد کنید:");
             return true;
@@ -226,7 +241,7 @@ class AdminHandler {
             $this->searchUser($user_id, $chat_id, $text);
             return true;
         }
-        if ($text === '👥 مدیریت ادمین‌ها' && $user_id === (int)$this->config['admin_id']) {
+        if (($text === '👥 مدیران' || $text === '👥 مدیریت ادمین‌ها') && $user_id === (int)$this->config['admin_id']) {
             setStep($this->pdo, $user_id, 'admin_mngr');
             $this->telegram->sendMessage($chat_id, "آیدی عددی برای افزودن ادمین، یا /deladmin_ID برای حذف:");
             return true;
@@ -264,7 +279,7 @@ class AdminHandler {
             $this->telegram->sendMessage($chat_id, "✅ سوابق تست پاک شد.");
             return true;
         }
-        if ($text === '📢 مدیریت جوین اجباری') {
+        if ($text === '🔒 کانال‌های قفل' || $text === '📢 مدیریت جوین اجباری') {
             setStep($this->pdo, $user_id, 'admin_fjoin');
             $this->telegram->request('sendMessage', ['chat_id' => $chat_id, 'text' => 'تنظیمات کانال‌های قفل:', 'reply_markup' => getForceJoinKeyboard()]);
             return true;
@@ -518,11 +533,32 @@ class AdminHandler {
         }
         if ($text === '🎁 شارژ همگانی') { setStep($this->pdo, $user_id, 'gift_all'); $this->telegram->sendMessage($chat_id, 'مبلغ هدیه به تومان:'); return true; }
         if ($step === 'gift_all') { $num = onlyNumber($text); if (!$num) { $this->telegram->sendMessage($chat_id, '❌ فقط عدد!'); return true; } $this->pdo->prepare("UPDATE users SET wallet = wallet + ?")->execute([(int)$num]); setStep($this->pdo, $user_id, 'admin_finance'); $this->telegram->sendMessage($chat_id, '✅ شارژ همگانی انجام شد.'); return true; }
-        if ($text === '🔥 کسر همگانی') { setStep($this->pdo, $user_id, 'deduct_all'); $this->telegram->sendMessage($chat_id, 'مبلغ کسر به تومان:'); return true; }
+        if ($text === '💸 کسر همگانی' || $text === '🔥 کسر همگانی') { setStep($this->pdo, $user_id, 'deduct_all'); $this->telegram->sendMessage($chat_id, 'مبلغ کسر به تومان:'); return true; }
         if ($step === 'deduct_all') { $num = onlyNumber($text); if (!$num) { $this->telegram->sendMessage($chat_id, '❌ فقط عدد!'); return true; } $this->pdo->prepare("UPDATE users SET wallet = wallet - ?")->execute([(int)$num]); setStep($this->pdo, $user_id, 'admin_finance'); $this->telegram->sendMessage($chat_id, '✅ کسر همگانی انجام شد.'); return true; }
-        if ($text === '💎 تنظیمات نمایندگی') {
+        // مدیریت کمپین تخفیف
+        if (strpos($text, '🔥 کمپین') === 0) {
+            $this->showCampaignStatus($chat_id);
+            return true;
+        }
+        if ($step === 'set_campaign_pct') {
+            $num = onlyNumber($text);
+            if (!$num || (int)$num < 1 || (int)$num > 99) { $this->telegram->sendMessage($chat_id, '❌ عدد بین ۱ تا ۹۹ وارد کنید:'); return true; }
+            updateSetting($this->pdo, 'campaign_pct', $num);
+            setStep($this->pdo, $user_id, 'set_campaign_label');
+            $this->telegram->request('sendMessage', ['chat_id' => $chat_id, 'parse_mode' => 'HTML',
+                'text' => "✅ تخفیف {$num}٪ تنظیم شد.\n\nبرچسب کمپین را وارد کنید (مثلاً: جشنواره نوروز 🌸)\nیا برای رد شدن روی زیر کلیک کنید:",
+                'reply_markup' => json_encode(['inline_keyboard' => [[['text' => '⏩ رد شدن', 'callback_data' => 'campaign_skip_label']]]])]); return true;
+        }
+        if ($step === 'set_campaign_label') {
+            updateSetting($this->pdo, 'campaign_label', $text);
+            updateSetting($this->pdo, 'campaign_status', '1');
+            setStep($this->pdo, $user_id, 'admin_finance');
+            $this->telegram->request('sendMessage', ['chat_id' => $chat_id, 'parse_mode' => 'HTML',
+                'text' => "🔥 <b>کمپین فعال شد!</b>\nبرچسب: $text", 'reply_markup' => getFinanceKeyboard()]); return true;
+        }
+        if ($text === '💎 نمایندگی' || $text === '💎 تنظیمات نمایندگی') {
             setStep($this->pdo, $user_id, 'admin_reseller');
-            $keys = json_encode(['keyboard' => [[['text' => '💵 هزینه اشتراک نمایندگی'], ['text' => 'درصد تخفیف نمایندگی']], [['text' => '🔙 تنظیمات ربات']]], 'resize_keyboard' => true]);
+            $keys = json_encode(['keyboard' => [[['text' => '💵 هزینه اشتراک نمایندگی'], ['text' => 'درصد تخفیف نمایندگی']], [['text' => '🔙 بازگشت به داشبورد']]], 'resize_keyboard' => true]);
             $this->telegram->request('sendMessage', ['chat_id' => $chat_id, 'parse_mode' => 'HTML', 'reply_markup' => $keys,
                 'text' => "💎 <b>نمایندگی:</b>\nهزینه: " . number_format((int)$this->settings['reseller_fee']) . " تومان\nتخفیف: {$this->settings['reseller_discount']}%"]); return true;
         }
@@ -538,20 +574,21 @@ class AdminHandler {
     // ========================
 
     private function handleBotSettings(int $user_id, int $chat_id, string $text, ?string $step): bool {
-        if ($text === '⚙️ روشن/خاموش دکمه‌ها') { setStep($this->pdo, $user_id, 'admin_btn_toggles'); $this->telegram->request('sendMessage', ['chat_id' => $chat_id, 'text' => 'دکمه‌ها:', 'reply_markup' => getButtonsToggleKeyboard()]); return true; }
+        // دکمه‌های جدید + سازگاری با قدیمی
+        if ($text === '⚙️ دکمه‌های منو' || $text === '⚙️ روشن/خاموش دکمه‌ها') { setStep($this->pdo, $user_id, 'admin_btn_toggles'); $this->telegram->request('sendMessage', ['chat_id' => $chat_id, 'text' => 'دکمه‌ها:', 'reply_markup' => getButtonsToggleKeyboard()]); return true; }
         if ($text === '🎛 دکمه‌های درون سرویس')  { setStep($this->pdo, $user_id, 'admin_myserv_btn'); $this->telegram->request('sendMessage', ['chat_id' => $chat_id, 'text' => 'دکمه‌های داخلی:', 'reply_markup' => getMyServicesSettingsKeyboard()]); return true; }
         if ($text === '🔙 تنظیمات ربات')          { setStep($this->pdo, $user_id, 'admin_settings'); $this->telegram->request('sendMessage', ['chat_id' => $chat_id, 'text' => 'تنظیمات:', 'reply_markup' => getBotSettingsKeyboard()]); return true; }
-        if ($text === '👨‍💻 تنظیم آیدی پشتیبانی') { setStep($this->pdo, $user_id, 'set_support'); $this->telegram->sendMessage($chat_id, 'آیدی پشتیبانی (با @):'); return true; }
+        if ($text === '👤 پشتیبانی' || $text === '👨‍💻 تنظیم آیدی پشتیبانی') { setStep($this->pdo, $user_id, 'set_support'); $this->telegram->sendMessage($chat_id, 'آیدی پشتیبانی (با @):'); return true; }
         if ($step === 'set_support') { updateSetting($this->pdo, 'support_id', $text); setStep($this->pdo, $user_id, 'admin_settings'); $this->telegram->request('sendMessage', ['chat_id' => $chat_id, 'text' => '✅ ثبت شد.', 'reply_markup' => getBotSettingsKeyboard()]); return true; }
-        if ($text === '📢 تنظیم چنل گزارشات') { setStep($this->pdo, $user_id, 'set_admin_channel'); $this->telegram->sendMessage($chat_id, 'آیدی کانال:'); return true; }
+        if ($text === '📢 کانال گزارشات' || $text === '📢 تنظیم چنل گزارشات') { setStep($this->pdo, $user_id, 'set_admin_channel'); $this->telegram->sendMessage($chat_id, 'آیدی کانال:'); return true; }
         if ($step === 'set_admin_channel') { updateSetting($this->pdo, 'admin_channel', $text); setStep($this->pdo, $user_id, 'admin_settings'); $this->telegram->request('sendMessage', ['chat_id' => $chat_id, 'text' => '✅ ثبت شد.', 'reply_markup' => getBotSettingsKeyboard()]); return true; }
-        if ($text === '💬 تنظیم پیام خوش‌آمدگویی (/start)') {
+        if ($text === '💬 پیام خوش‌آمدگویی' || $text === '💬 تنظیم پیام خوش‌آمدگویی (/start)') {
             setStep($this->pdo, $user_id, 'set_text_start');
             $this->telegram->request('sendMessage', ['chat_id' => $chat_id, 'parse_mode' => 'HTML',
                 'text' => "💬 متن جدید پیام /start را بفرستید:", 'reply_markup' => getCancelKeyboard()]); return true;
         }
         if ($step === 'set_text_start') { updateSetting($this->pdo, 'text_start', $text); setStep($this->pdo, $user_id, 'admin_settings'); $this->telegram->request('sendMessage', ['chat_id' => $chat_id, 'text' => '✅ پیام خوش‌آمدگویی تغییر کرد.', 'reply_markup' => getBotSettingsKeyboard()]); return true; }
-        if ($text === '📝 تنظیم متن آموزش') {
+        if ($text === '📝 متن آموزش‌ها' || $text === '📝 تنظیم متن آموزش') {
             $keys = json_encode(['inline_keyboard' => [[['text' => '📱 Android', 'callback_data' => 'edit_guide_and'], ['text' => '🍏 iOS', 'callback_data' => 'edit_guide_ios']], [['text' => '💻 Windows', 'callback_data' => 'edit_guide_win'], ['text' => '🐧 Linux', 'callback_data' => 'edit_guide_lin']]]]);
             $this->telegram->request('sendMessage', ['chat_id' => $chat_id, 'text' => 'بخش مورد نظر:', 'reply_markup' => $keys]); return true;
         }
@@ -674,5 +711,33 @@ class AdminHandler {
             $this->telegram->sendMessage($chat_id, $msg); return true;
         }
         return false;
+    }
+
+    // ========================
+    // وضعیت کمپین تخفیف
+    // ========================
+
+    public function showCampaignStatus(int $chat_id): void {
+        $s       = $this->settings;
+        $active  = !empty($s['campaign_status']) && $s['campaign_status'] == '1';
+        $pct     = (int)($s['campaign_pct'] ?? 0);
+        $label   = !empty($s['campaign_label']) ? $s['campaign_label'] : '—';
+
+        $rows = [
+            "وضعیت: " . ($active ? "🔥 فعال" : "خاموش"),
+            "درصد: " . ($pct > 0 ? "{$pct}٪" : "—"),
+            "برچسب: " . $label,
+        ];
+        $msg = formatCard('کمپین تخفیف', $rows);
+
+        $keys = [];
+        if ($active) {
+            $keys[] = [['text' => '🔴 غیرفعال کردن کمپین', 'callback_data' => 'campaign_deactivate']];
+        } else {
+            $keys[] = [['text' => '✅ فعال کردن کمپین جدید', 'callback_data' => 'campaign_activate']];
+        }
+
+        $this->telegram->request('sendMessage', ['chat_id' => $chat_id, 'parse_mode' => 'HTML',
+            'text' => $msg, 'reply_markup' => json_encode(['inline_keyboard' => $keys])]);
     }
 }

@@ -181,12 +181,22 @@ class UserHandler {
         }
 
         if ($text === $this->settings['account_text'] && $this->settings['account_status'] == '1') {
-            $status = $user['is_reseller'] ? "💎 <b>نماینده فعال</b>" : "کاربر عادی";
-            $this->telegram->request('sendMessage', ['chat_id' => $chat_id, 'parse_mode' => 'HTML',
-                'text' => "👤 آیدی: <code>$user_id</code>\n💰 کیف پول: <code>" . number_format((int)$user['wallet']) . "</code> T\n🏅 سطح: $status"]);
+            $this->showAccount($user_id, $chat_id, $user);
             return;
         }
 
+        if ($text === '📖 راهنما و تست') {
+            $this->showGuideAndTrial($user_id, $chat_id, $user);
+            return;
+        }
+
+        if ($text === $this->settings['support_text'] && $this->settings['support_status'] == '1') {
+            $this->telegram->request('sendMessage', ['chat_id' => $chat_id, 'parse_mode' => 'HTML',
+                'text' => "💬 <b>پشتیبانی</b>\n\n{$this->settings['support_id']}"]);
+            return;
+        }
+
+        // دکمه‌های قدیمی برای سازگاری با کاربرانی که هنوز کیبورد قدیمی دارند
         if ($text === '💰 شارژ کیف پول') {
             setStep($this->pdo, $user_id, 'user_charge_wallet');
             $this->telegram->request('sendMessage', ['chat_id' => $chat_id, 'parse_mode' => 'HTML',
@@ -210,18 +220,53 @@ class UserHandler {
             return;
         }
 
-        if ($text === $this->settings['support_text'] && $this->settings['support_status'] == '1') {
-            $this->telegram->sendMessage($chat_id, "👨‍💻 جهت پشتیبانی:\n{$this->settings['support_id']}");
+        if ($text === $this->settings['guide_text'] && $this->settings['guide_status'] == '1') {
+            $this->showGuideAndTrial($user_id, $chat_id, $user);
             return;
         }
+    }
 
-        if ($text === $this->settings['guide_text'] && $this->settings['guide_status'] == '1') {
-            $keys = json_encode(['inline_keyboard' => [
-                [['text' => '📱 Android', 'callback_data' => 'dl_and'], ['text' => '🍏 iOS', 'callback_data' => 'dl_ios']],
-                [['text' => '💻 Windows', 'callback_data' => 'dl_win'], ['text' => '🐧 Linux', 'callback_data' => 'dl_lin']],
-            ]]);
-            $this->telegram->request('sendMessage', ['chat_id' => $chat_id, 'text' => '📥 سیستم‌عامل خود را انتخاب کنید:', 'reply_markup' => $keys]);
+    private function showAccount(int $user_id, int $chat_id, array $user): void {
+        $level = $user['is_reseller'] ? "💎 نماینده فعال" : "کاربر عادی";
+        $rows  = [
+            "🆔 آیدی: <code>$user_id</code>",
+            "💰 موجودی: <code>" . number_format((int)$user['wallet']) . "</code> تومان",
+            "🏅 سطح: $level",
+        ];
+        $msg  = formatCard('حساب شما', $rows);
+        $keys = [
+            [['text' => '💰 شارژ کیف پول', 'callback_data' => 'account_charge']],
+        ];
+        if ($this->settings['referral_status'] == '1') {
+            $keys[] = [['text' => '🔗 لینک دعوت', 'callback_data' => 'account_referral']];
         }
+        if (!$user['is_reseller']) {
+            $keys[] = [['text' => '🤝 درخواست نمایندگی', 'callback_data' => 'account_reseller']];
+        }
+        $this->telegram->request('sendMessage', ['chat_id' => $chat_id, 'parse_mode' => 'HTML',
+            'text' => $msg, 'reply_markup' => json_encode(['inline_keyboard' => $keys])]);
+    }
+
+    private function showGuideAndTrial(int $user_id, int $chat_id, array $user): void {
+        $guide_keys = [];
+        if ($this->settings['guide_status'] == '1') {
+            $guide_keys[] = [
+                ['text' => '📱 Android', 'callback_data' => 'dl_and'],
+                ['text' => '🍏 iOS',     'callback_data' => 'dl_ios'],
+            ];
+            $guide_keys[] = [
+                ['text' => '💻 Windows', 'callback_data' => 'dl_win'],
+                ['text' => '🐧 Linux',   'callback_data' => 'dl_lin'],
+            ];
+        }
+        if ($this->settings['trial_status'] == '1' && !$user['trial_used']) {
+            $guide_keys[] = [['text' => '🎁 دریافت تست رایگان', 'callback_data' => 'get_trial']];
+        } elseif ($this->settings['trial_status'] == '1' && $user['trial_used']) {
+            $guide_keys[] = [['text' => '✅ تست دریافت شده', 'callback_data' => 'trial_used']];
+        }
+        $this->telegram->request('sendMessage', ['chat_id' => $chat_id,
+            'text' => '📖 سیستم‌عامل خود را انتخاب کنید:',
+            'reply_markup' => json_encode(['inline_keyboard' => $guide_keys])]);
     }
 
     private function handleStart(array $update, int $user_id, int $chat_id, string $text, array $user): void {
@@ -263,15 +308,31 @@ class UserHandler {
             $this->telegram->sendMessage($chat_id, 'در حال حاضر پلنی موجود نیست.');
             return;
         }
+
+        $campaign_active = !empty($this->settings['campaign_status']) && $this->settings['campaign_status'] == '1'
+                         && (int)($this->settings['campaign_pct'] ?? 0) > 0;
+
         $keys = [];
         foreach ($plans as $p) {
-            $fp     = getFinalPrice($this->pdo, (string)$p['id'], 'none', $user_id, $this->settings);
-            $keys[] = [['text' => "🛒 {$p['name']} | " . number_format($fp['final_price']) . ' T', 'callback_data' => "pay|{$p['id']}|none|name"]];
+            $fp = getFinalPrice($this->pdo, (string)$p['id'], 'none', $user_id, $this->settings);
+            if ($campaign_active && $fp['final_price'] < (int)$p['price']) {
+                $label = "🛒 {$p['name']} | " . number_format($fp['final_price']) . ' T 🔥';
+            } else {
+                $label = "🛒 {$p['name']} | " . number_format($fp['final_price']) . ' T';
+            }
+            $keys[] = [['text' => $label, 'callback_data' => "pay|{$p['id']}|none|name"]];
         }
         if ($this->settings['custom_plan_status'] == '1') {
-            $keys[] = [['text' => '🎛 ساخت پلن دلخواه', 'callback_data' => 'custom_plan_start']];
+            $keys[] = [['text' => '🎛 پلن دلخواه', 'callback_data' => 'custom_plan_start']];
         }
+
         $header = $user['is_reseller'] ? "💎 <b>تعرفه‌های ویژه نمایندگان:</b>" : "پلن مورد نظر را انتخاب کنید:";
+        if ($campaign_active) {
+            $label   = !empty($this->settings['campaign_label']) ? $this->settings['campaign_label'] : 'کمپین ویژه';
+            $pct     = (int)$this->settings['campaign_pct'];
+            $header  = "🔥 <b>{$label} — {$pct}٪ تخفیف روی همه پلن‌ها!</b>\n\n" . $header;
+        }
+
         $this->telegram->request('sendMessage', ['chat_id' => $chat_id, 'text' => $header,
             'parse_mode' => 'HTML', 'reply_markup' => json_encode(['inline_keyboard' => $keys])]);
     }

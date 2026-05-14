@@ -76,4 +76,43 @@ class Telegram {
             'show_alert'        => $alert,
         ]);
     }
+
+    public function getUpdates(int $offset = 0, int $timeout = 60): array {
+        $url = "https://api.telegram.org/bot{$this->token}/getUpdates";
+        $ch  = curl_init();
+        curl_setopt($ch, CURLOPT_URL, $url);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_POST, true);
+        curl_setopt($ch, CURLOPT_POSTFIELDS, http_build_query([
+            'offset'  => $offset,
+            'timeout' => $timeout,
+            'limit'   => 100,
+        ]));
+        curl_setopt($ch, CURLOPT_PROXY, $this->proxy);
+        curl_setopt($ch, CURLOPT_PROXYTYPE, CURLPROXY_SOCKS5_HOSTNAME);
+        if (!empty($this->proxy_auth)) {
+            curl_setopt($ch, CURLOPT_PROXYUSERPWD, $this->proxy_auth);
+        }
+        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+        curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
+        curl_setopt($ch, CURLOPT_TIMEOUT, $timeout + 15);
+
+        $response = curl_exec($ch);
+        $err      = curl_error($ch);
+        curl_close($ch);
+
+        if ($response === false) {
+            error_log("[Telegram::getUpdates] cURL error: {$err}");
+            return [];
+        }
+        $decoded = json_decode($response, true);
+        if (!$decoded || !$decoded['ok'] || empty($decoded['result'])) {
+            return [];
+        }
+        return $decoded['result'];
+    }
+
+    public function deleteWebhook(): void {
+        $this->request('deleteWebhook', ['drop_pending_updates' => false]);
+    }
 }

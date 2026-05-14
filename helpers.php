@@ -8,6 +8,17 @@
 // توابع تبدیل و فرمت‌بندی
 // ========================
 
+function formatCard(string $title, array $rows, string $footer = ''): string {
+    $bar = str_repeat('─', mb_strlen($title, 'UTF-8') + 4);
+    $lines = ["┌─ <b>$title</b> ─┐"];
+    foreach ($rows as $row) {
+        $lines[] = "│ $row";
+    }
+    $lines[] = "└$bar┘";
+    if ($footer !== '') $lines[] = "\n<i>$footer</i>";
+    return implode("\n", $lines);
+}
+
 function convert2English(string $str): string {
     return Utils::toEnglishDigits($str);
 }
@@ -138,6 +149,7 @@ function getFinalPrice(PDO $pdo, string $pid, string $code, int $user_id, array 
     }
 
     $price = (int)$plan['price'];
+    $plan['original_price'] = $price;
 
     // تخفیف نمایندگی
     if ($user_id > 0 && !empty($settings)) {
@@ -148,6 +160,16 @@ function getFinalPrice(PDO $pdo, string $pid, string $code, int $user_id, array 
             $price = (int)($price - ($price * $disc / 100));
         }
     }
+
+    // تخفیف کمپین سراسری
+    $campaign_pct = 0;
+    if (!empty($settings['campaign_status']) && $settings['campaign_status'] == '1') {
+        $campaign_pct = max(0, min(99, (int)($settings['campaign_pct'] ?? 0)));
+        if ($campaign_pct > 0) {
+            $price = (int)round($price * (100 - $campaign_pct) / 100);
+        }
+    }
+    $plan['campaign_pct'] = $campaign_pct;
 
     // کد تخفیف
     if ($code !== 'none') {
@@ -172,24 +194,19 @@ function getUserKeyboard(array $s): string {
     $r1 = [];
     $r2 = [];
     $r3 = [];
-    $r4 = [];
-    $r5 = [];
 
     if ($s['buy_status'] == '1')      $r1[] = ['text' => $s['buy_text']];
     if ($s['services_status'] == '1') $r1[] = ['text' => $s['services_text']];
     if ($s['account_status'] == '1')  $r2[] = ['text' => $s['account_text']];
-    if ($s['trial_status'] == '1')    $r2[] = ['text' => $s['trial_text']];
-    if ($s['referral_status'] == '1') $r3[] = ['text' => $s['referral_text']];
-    if ($s['support_status'] == '1')  $r3[] = ['text' => $s['support_text']];
-    if ($s['guide_status'] == '1')    $r4[] = ['text' => $s['guide_text']];
-    $r4[] = ['text' => '💰 شارژ کیف پول'];
-    $r5[] = ['text' => '🤝 درخواست نمایندگی'];
+    if ($s['support_status'] == '1')  $r2[] = ['text' => $s['support_text']];
+    // راهنما و تست ترکیب می‌شوند
+    if ($s['guide_status'] == '1' || $s['trial_status'] == '1') {
+        $r3[] = ['text' => '📖 راهنما و تست'];
+    }
 
     if (!empty($r1)) $kb[] = $r1;
     if (!empty($r2)) $kb[] = $r2;
     if (!empty($r3)) $kb[] = $r3;
-    if (!empty($r4)) $kb[] = $r4;
-    if (!empty($r5)) $kb[] = $r5;
 
     return json_encode(['keyboard' => $kb, 'resize_keyboard' => true]);
 }
@@ -198,12 +215,15 @@ function getCancelKeyboard(): string {
     return json_encode(['keyboard' => [[['text' => '🔙 انصراف']]], 'resize_keyboard' => true]);
 }
 
-function getAdminMainKeyboard(): string {
+function getAdminMainKeyboard(array $s = []): string {
+    $status_label = (!empty($s['bot_status']) && $s['bot_status'] == '1')
+        ? '⬤ ربات: روشن — کلیک برای خاموش'
+        : '⬤ ربات: خاموش — کلیک برای روشن';
     return json_encode(['keyboard' => [
-        [['text' => '🛍 مدیریت فروشگاه'],  ['text' => '👥 کاربران و آمار']],
-        [['text' => '💳 مالی و کیف‌پول'],  ['text' => '⚙️ تنظیمات ربات']],
-        [['text' => '🔌 اتصال سرور (سنایی)'], ['text' => '🖥 مدیریت سرورها']],
-        [['text' => '🔴 وضعیت ربات 🟢'],   ['text' => '🔙 بازگشت به ربات']],
+        [['text' => '🛍 فروشگاه'],   ['text' => '👥 کاربران']],
+        [['text' => '💳 مالی'],      ['text' => '⚙️ تنظیمات']],
+        [['text' => $status_label]],
+        [['text' => '🔙 بازگشت به ربات']],
     ], 'resize_keyboard' => true]);
 }
 
@@ -218,17 +238,18 @@ function getStoreKeyboard(): string {
 
 function getUsersSettingsKeyboard(): string {
     return json_encode(['keyboard' => [
-        [['text' => '📊 آمار پیشرفته ربات'], ['text' => '🔍 مدیریت کاربر']],
-        [['text' => '📢 مدیریت جوین اجباری'], ['text' => '👥 مدیریت ادمین‌ها']],
-        [['text' => '📢 پیام همگانی'],       ['text' => '🎁 پاداش زیرمجموعه‌گیری']],
-        [['text' => '📢 ارسال به کانال'],    ['text' => '⚙️ تنظیم دکمه کانال']],
-        [['text' => '🔄 پاکسازی سابقه تست‌ها']],
+        [['text' => '📊 آمار'],              ['text' => '🔍 جستجوی کاربر']],
+        [['text' => '📢 پیام همگانی'],       ['text' => '🔒 کانال‌های قفل']],
+        [['text' => '📢 ارسال به کانال'],    ['text' => '👥 مدیران']],
         [['text' => '🔙 بازگشت به داشبورد']],
     ], 'resize_keyboard' => true]);
 }
 
 function getFinanceKeyboard(): string {
     $s = getSettings();
+    $campaign_label = (!empty($s['campaign_status']) && $s['campaign_status'] == '1')
+        ? '🔥 کمپین فعال: ' . ($s['campaign_pct'] ?? '0') . '٪ — کلیک برای مدیریت'
+        : '🔥 کمپین تخفیف (غیرفعال)';
     return json_encode(['keyboard' => [
         [['text' => '🌐 تنظیمات درگاه آنلاین (Tetra98)']],
         [['text' => '💳 تنظیم کارت به کارت'],  ['text' => '💲 تنظیم درگاه ارزی']],
@@ -236,17 +257,19 @@ function getFinanceKeyboard(): string {
          ['text' => 'وضعیت ارزی: ' . ($s['crypto_status'] == '1' ? 'روشن 🟢' : 'خاموش 🔴')]],
         [['text' => '📝 تنظیم متن درگاه ارزی']],
         [['text' => '➕ شارژ کیف پول'],  ['text' => '➖ کسر از کیف پول']],
-        [['text' => '🎁 شارژ همگانی'],   ['text' => '🔥 کسر همگانی']],
+        [['text' => '🎁 شارژ همگانی'],   ['text' => '💸 کسر همگانی']],
+        [['text' => $campaign_label]],
         [['text' => '🔙 بازگشت به داشبورد']],
     ], 'resize_keyboard' => true]);
 }
 
 function getBotSettingsKeyboard(): string {
     return json_encode(['keyboard' => [
-        [['text' => '⚙️ روشن/خاموش دکمه‌ها'], ['text' => '🎛 دکمه‌های درون سرویس']],
-        [['text' => '👨‍💻 تنظیم آیدی پشتیبانی'], ['text' => '📢 تنظیم چنل گزارشات']],
-        [['text' => '💎 تنظیمات نمایندگی'],     ['text' => '📝 تنظیم متن آموزش']],
-        [['text' => '💬 تنظیم پیام خوش‌آمدگویی (/start)']],
+        [['text' => '⚙️ دکمه‌های منو'],          ['text' => '🎛 دکمه‌های درون سرویس']],
+        [['text' => '👤 پشتیبانی'],               ['text' => '📢 کانال گزارشات']],
+        [['text' => '💎 نمایندگی'],               ['text' => '📝 متن آموزش‌ها']],
+        [['text' => '🔌 پنل اصلی (XUI)'],        ['text' => '🖥 سرورها']],
+        [['text' => '💬 پیام خوش‌آمدگویی']],
         [['text' => '🔙 بازگشت به داشبورد']],
     ], 'resize_keyboard' => true]);
 }
@@ -314,28 +337,39 @@ function sendInvoiceMsg(
     array $settings,
     ?string $config_name = null
 ): void {
-    $name_line = $config_name ? "\n👤 نام کانفیگ: <code>$config_name</code>" : '';
-    $disc_note = $plan['final_price'] < $plan['price'] ? ' (با تخفیف)' : '';
+    $rows = ["🛍 پلن: {$plan['name']}"];
+    if ($config_name) $rows[] = "👤 نام کانفیگ: <code>$config_name</code>";
 
-    $msg = "🧾 <b>پیش‌فاکتور:</b>\n🔸 {$plan['name']}{$name_line}\n"
-         . "💵 مبلغ قابل پرداخت: <code>" . number_format($plan['final_price']) . "</code> تومان{$disc_note}"
-         . "\n\nلطفاً روش پرداخت را انتخاب کنید:";
+    $original = (int)($plan['original_price'] ?? $plan['price']);
+    $final    = (int)$plan['final_price'];
+
+    if ($final < $original) {
+        $rows[] = "💵 قیمت: <s>" . number_format($original) . "</s>  " . number_format($final) . " تومان";
+        if (!empty($plan['campaign_pct']) && $plan['campaign_pct'] > 0) {
+            $label = !empty($settings['campaign_label']) ? $settings['campaign_label'] : 'کمپین';
+            $rows[] = "🔥 {$label} ({$plan['campaign_pct']}٪ تخفیف)";
+        }
+    } else {
+        $rows[] = "💵 مبلغ: " . number_format($final) . " تومان";
+    }
+
+    $msg = formatCard('پیش‌فاکتور', $rows) . "\n\nروش پرداخت را انتخاب کنید:";
 
     $keys = [];
-    if ($wallet >= $plan['final_price']) {
-        $keys[] = [['text' => '💰 پرداخت آنی از کیف پول', 'callback_data' => "pay|{$pid}|{$code}|wallet"]];
+    if ($wallet >= $final) {
+        $keys[] = [['text' => '💰 پرداخت از موجودی (' . number_format($wallet) . ' تومان)', 'callback_data' => "pay|{$pid}|{$code}|wallet"]];
     }
     if ($settings['tetra_status'] == '1') {
-        $keys[] = [['text' => '🌐 پرداخت آنلاین (تترا98)', 'callback_data' => "pay|{$pid}|{$code}|tetra"]];
+        $keys[] = [['text' => '🌐 پرداخت آنلاین', 'callback_data' => "pay|{$pid}|{$code}|tetra"]];
     }
     if ($settings['card_status'] == '1') {
         $keys[] = [['text' => '💳 کارت به کارت', 'callback_data' => "pay|{$pid}|{$code}|card"]];
     }
     if ($settings['crypto_status'] == '1') {
-        $keys[] = [['text' => '💲 پرداخت ارزی', 'callback_data' => "pay|{$pid}|{$code}|crypto"]];
+        $keys[] = [['text' => '💲 ارزی (Crypto)', 'callback_data' => "pay|{$pid}|{$code}|crypto"]];
     }
     if ($code == 'none') {
-        $keys[] = [['text' => '🎟 استفاده از کد تخفیف', 'callback_data' => "apply_disc|{$pid}"]];
+        $keys[] = [['text' => '🎟 کد تخفیف', 'callback_data' => "apply_disc|{$pid}"]];
     }
 
     $telegram->request('sendMessage', [
