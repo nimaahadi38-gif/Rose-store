@@ -1,0 +1,49 @@
+# ──────────────────────────────────────────────────────────────
+# Environment & Credentials
+# هیچ مقدار حساسی نباید کامیت شود
+# ──────────────────────────────────────────────────────────────
+.env
+.env.local
+.env.*.local
+
+# ──────────────────────────────────────────────────────────────
+# Storage (runtime artifacts)
+# ──────────────────────────────────────────────────────────────
+storage/logs/*
+storage/cache/*
+storage/cookies/*
+storage/runtime/*
+storage/spam/*
+!storage/logs/.gitkeep
+!storage/cache/.gitkeep
+!storage/cookies/.gitkeep
+!storage/runtime/.gitkeep
+
+# آفست long polling و قفل ربات
+storage/offset.txt
+storage/bot.lock
+storage/bot_settings.json
+storage/cookie.txt
+storage/states/*
+
+# ──────────────────────────────────────────────────────────────
+# Dependencies
+# ──────────────────────────────────────────────────────────────
+/vendor/
+composer.lock
+
+# ──────────────────────────────────────────────────────────────
+# IDE & OS
+# ──────────────────────────────────────────────────────────────
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# ──────────────────────────────────────────────────────────────
+# Tests & Coverage
+# ──────────────────────────────────────────────────────────────
+/coverage/
+.phpunit.result.cache
